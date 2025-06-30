@@ -17,31 +17,17 @@ interface TranslationResponse {
 }
 
 export class WhisperService {
-  private apiKey: string
-  private baseUrl: string
-
   constructor() {
-    this.apiKey = process.env.NEXT_PUBLIC_OPENAI_API_KEY || ""
-    this.baseUrl = "https://api.openai.com/v1"
+    // No API key needed on client side anymore
   }
 
   async transcribeAudio(audioBlob: Blob): Promise<TranscriptionResponse> {
-    // In demo mode, simulate transcription
-    if (!this.apiKey) {
-      return this.simulateTranscription(audioBlob)
-    }
-
     try {
       const formData = new FormData()
-      formData.append("file", audioBlob, "audio.webm")
-      formData.append("model", "whisper-1")
-      formData.append("language", "auto") // Auto-detect language
+      formData.append("audio", audioBlob, "audio.webm")
 
-      const response = await fetch(`${this.baseUrl}/audio/transcriptions`, {
+      const response = await fetch("/api/transcribe", {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${this.apiKey}`,
-        },
         body: formData,
       })
 
@@ -50,12 +36,7 @@ export class WhisperService {
       }
 
       const data = await response.json()
-
-      return {
-        text: data.text,
-        language: data.language || "en",
-        confidence: 0.95, // Whisper doesn't return confidence, so we estimate
-      }
+      return data
     } catch (error) {
       console.error("Transcription error:", error)
       toast.error("Transcription failed, using demo mode")
@@ -64,32 +45,16 @@ export class WhisperService {
   }
 
   async translateText(text: string, sourceLanguage: string, targetLanguage: string): Promise<TranslationResponse> {
-    // In demo mode, simulate translation
-    if (!this.apiKey) {
-      return this.simulateTranslation(text, sourceLanguage, targetLanguage)
-    }
-
     try {
-      const response = await fetch(`${this.baseUrl}/chat/completions`, {
+      const response = await fetch("/api/translate", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${this.apiKey}`,
         },
         body: JSON.stringify({
-          model: "gpt-3.5-turbo",
-          messages: [
-            {
-              role: "system",
-              content: `You are a professional translator. Translate the following text from ${sourceLanguage} to ${targetLanguage}. Return only the translation, no explanations.`,
-            },
-            {
-              role: "user",
-              content: text,
-            },
-          ],
-          max_tokens: 1000,
-          temperature: 0.3,
+          text,
+          sourceLanguage,
+          targetLanguage,
         }),
       })
 
@@ -98,16 +63,12 @@ export class WhisperService {
       }
 
       const data = await response.json()
-      const translatedText = data.choices[0]?.message?.content || text
 
       // Generate TTS audio for the translation
-      const audioData = await this.generateTTS(translatedText, targetLanguage)
+      const audioData = await this.generateTTS(data.translatedText, targetLanguage)
 
       return {
-        translatedText,
-        originalText: text,
-        sourceLanguage,
-        targetLanguage,
+        ...data,
         audioData,
       }
     } catch (error) {
@@ -119,17 +80,14 @@ export class WhisperService {
 
   private async generateTTS(text: string, language: string): Promise<string> {
     try {
-      const response = await fetch(`${this.baseUrl}/audio/speech`, {
+      const response = await fetch("/api/tts", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${this.apiKey}`,
         },
         body: JSON.stringify({
-          model: "tts-1",
-          input: text,
-          voice: this.getVoiceForLanguage(language),
-          response_format: "mp3",
+          text,
+          language,
         }),
       })
 
@@ -137,29 +95,12 @@ export class WhisperService {
         throw new Error(`TTS failed: ${response.statusText}`)
       }
 
-      const audioBuffer = await response.arrayBuffer()
-      const base64Audio = btoa(String.fromCharCode(...new Uint8Array(audioBuffer)))
-
-      return base64Audio
+      const data = await response.json()
+      return data.audioData
     } catch (error) {
       console.error("TTS error:", error)
       return this.generateMockTTS(text)
     }
-  }
-
-  private getVoiceForLanguage(language: string): string {
-    const voiceMap: Record<string, string> = {
-      en: "alloy",
-      es: "nova",
-      fr: "shimmer",
-      de: "echo",
-      it: "fable",
-      pt: "onyx",
-      ja: "alloy",
-      ko: "nova",
-      zh: "shimmer",
-    }
-    return voiceMap[language] || "alloy"
   }
 
   // Demo mode simulations
